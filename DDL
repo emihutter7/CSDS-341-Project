@@ -1,0 +1,119 @@
+--Table for league
+CREATE TABLE league (
+leagueID INT PRIMARY KEY,
+name VARCHAR(100) NOT NULL
+);
+-- Table for team
+CREATE TABLE team (
+teamID INT PRIMARY KEY,
+teamName VARCHAR(100) NOT NULL,
+city VARCHAR(100) NOT NULL,
+arena VARCHAR(100) NOT NULL,
+coachID INT,
+leagueID INT,
+FOREIGN KEY (leagueID) REFERENCES league(leagueID),
+FOREIGN KEY (coachID) REFERENCES coach(coachID)
+);
+-- Table for personnel
+CREATE TABLE personnel (
+personnelID INT PRIMARY KEY,
+teamID INT,
+fName VARCHAR(50) NOT NULL,
+lName VARCHAR(50) NOT NULL,
+status VARCHAR(10) CHECK (status IN ('active', 'inactive')),
+FOREIGN KEY (teamID) REFERENCES team(teamID)
+);
+-- Table for player
+CREATE TABLE player (
+playerID INT PRIMARY KEY,
+DOB DATE,
+height DECIMAL(3, 2),
+weight DECIMAL(5, 2),
+position VARCHAR(20),
+FOREIGN KEY (playerID) REFERENCES personnel(personnelID)
+);
+-- Table for coach
+CREATE TABLE coach (
+coachID INT PRIMARY KEY,
+experienceYears INT,
+FOREIGN KEY (coachID) REFERENCES personnel(personnelID)
+);
+-- Table for game
+CREATE TABLE game (
+gameID INT PRIMARY KEY,
+homeTeamID INT,
+awayTeamID INT,
+date DATE,
+homeScore INT,
+awayScore INT,
+FOREIGN KEY (homeTeamID) REFERENCES team(teamID),
+FOREIGN KEY (awayTeamID) REFERENCES team(teamID)
+);
+-- Table for stats
+CREATE TABLE stats (
+gameID INT,
+playerID INT,
+points INT,
+assists INT,
+rebounds INT,
+steals INT,
+blocks INT,
+PRIMARY KEY (gameID, playerID),
+FOREIGN KEY (gameID) REFERENCES game(gameID),
+FOREIGN KEY (playerID) REFERENCES player(playerID)
+);
+
+-- Index on teamID for faster lookups on personnel
+CREATE INDEX idx_personnel_teamID ON personnel(teamID);
+-- Index on playerID for faster lookups on player stats
+CREATE INDEX idx_stats_playerID ON stats(playerID);
+-- Index on gameID for faster lookups in the stats table
+CREATE INDEX idx_stats_gameID ON stats(gameID);
+-- Index on homeTeamID and awayTeamID in the game table for fast lookups
+CREATE INDEX idx_game_homeTeamID ON game(homeTeamID);
+
+CREATE INDEX idx_game_awayTeamID ON game(awayTeamID);
+--insertion prevention of stats for an inactive player
+
+CREATE TRIGGER prevent_inactive_player_stats
+ON stats
+AFTER INSERT
+AS
+BEGIN
+DECLARE @player_status NVARCHAR(10);
+DECLARE @playerID INT;
+SELECT @playerID = playerID FROM inserted;
+SELECT @player_status = status FROM personnel WHERE personnelID = @playerID;
+-- If this player is inactive, there should be no insertion
+IF @player_status = 'inactive'
+BEGIN
+RAISERROR('Cannot insert stats for an inactive player', 16, 1);
+ROLLBACK TRANSACTION;
+END
+END;
+--3-2) Create a Table and Trigger to Store the Status Change Log
+CREATE TABLE player_status_log (
+logID INT IDENTITY PRIMARY KEY,
+playerID INT,
+oldStatus NVARCHAR(10),
+newStatus NVARCHAR(10),
+changeDate DATETIME
+);
+
+CREATE TRIGGER log_player_status_changes
+ON personnel
+AFTER UPDATE
+AS
+BEGIN
+DECLARE @change_date DATETIME = GETDATE();
+INSERT INTO player_status_log (playerID, oldStatus, newStatus, changeDate)
+SELECT
+d.personnelID,
+d.status AS oldStatus,
+i.status AS newStatus,
+@change_date
+FROM deleted d
+JOIN inserted i ON d.personnelID = i.personnelID
+-- Our log only changes when there is an actual change
+WHERE d.status != i.status;
+END;
